@@ -1,0 +1,110 @@
+# =========================
+# Dependencies
+# =========================
+node_modules/
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# Runtime Data
+# =========================
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# =========================
+# Coverage
+# =========================
+coverage/
+.nyc_output/
+
+# =========================
+# Build / Distribution
+# =========================
+dist/
+build/
+out/
+
+# =========================
+# Cache
+# =========================
+.cache/
+.parcel-cache/
+.eslintcache
+
+# =========================
+# Temporary Files
+# =========================
+tmp/
+temp/
+*.tmp
+
+# =========================
+# AWS
+# =========================
+.aws-sam/
+.serverless/
+
+# AWS Credentials (nếu lỡ copy vào project)
+credentials
+config
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Test Results
+# =========================
+test-results/
+playwright-report/
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Uploads
+# =========================
+uploads/
+storage/
+
+# =========================
+# Secrets
+# =========================
+*.pem
+*.key
+*.crt
+*.p12
+
+# =========================
+# Terraform (nếu dùng)
+# =========================
+.terraform/
+*.tfstate
+*.tfstate.*
