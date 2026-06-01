@@ -11,6 +11,7 @@ import cartRouter from "./routes/cartRoute.js";
 import addressRouter from "./routes/addressRoute.js";
 import orderRouter from "./routes/orderRoute.js";
 import { stripeWebhooks } from "./controllers/orderController.js";
+import { recordMetric } from "./configs/cloudwatch.js";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -51,6 +52,43 @@ app.use(
     credentials: true,
   })
 );
+
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+
+  res.on("finish", () => {
+    const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+    const path = req.originalUrl.split("?")[0];
+    const statusClass = `${Math.floor(res.statusCode / 100)}xx`;
+
+    console.log(
+      JSON.stringify({
+        type: "request",
+        method: req.method,
+        path,
+        status: res.statusCode,
+        status_class: statusClass,
+        duration_ms: Number(durationMs.toFixed(2)),
+        timestamp: new Date().toISOString(),
+      })
+    );
+
+    void recordMetric("ApiLatencyMs", durationMs, "Milliseconds", [
+      { Name: "Method", Value: req.method },
+      { Name: "Path", Value: path },
+      { Name: "StatusClass", Value: statusClass },
+    ]);
+
+    if (res.statusCode >= 500) {
+      void recordMetric("Api5xxCount", 1, "Count", [
+        { Name: "Method", Value: req.method },
+        { Name: "Path", Value: path },
+      ]);
+    }
+  });
+
+  next();
+});
 
 app.get("/", (req, res) => res.send("API is working"));
 app.get("/health", (req, res) =>

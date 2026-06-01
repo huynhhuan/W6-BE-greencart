@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from "cloudinary";
 import Product from "../models/Product.js";
+import { recordMetric } from "../configs/cloudwatch.js";
 
 // Add Product : api/product/add
 export const addProduct = async (req, res) => {
@@ -29,7 +30,26 @@ export const addProduct = async (req, res) => {
 // Get Product : api/product/list
 export const productList = async (req, res) => {
   try {
+    const start = process.hrtime.bigint();
     const products = await Product.find({});
+    const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+
+    console.log(
+      JSON.stringify({
+        type: "database_query",
+        collection: "products",
+        operation: "Product.find",
+        duration_ms: Number(durationMs.toFixed(2)),
+        result_count: products.length,
+        timestamp: new Date().toISOString(),
+      })
+    );
+
+    void recordMetric("MongoQueryLatencyMs", durationMs, "Milliseconds", [
+      { Name: "Operation", Value: "ProductList" },
+      { Name: "Collection", Value: "products" },
+    ]);
+
     res.json({ success: true, products });
   } catch (error) {
     console.log(error.message);

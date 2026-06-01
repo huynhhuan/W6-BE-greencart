@@ -2,13 +2,15 @@ import Order from "../models/Order.js";
 import Product from "../models/Product.js";
 import Stripe from "stripe";
 import User from "../models/User.js";
+import { recordMetric } from "../configs/cloudwatch.js";
 
 //Place Order COD: /api/order/cod
 export const placeOrderCOD = async (req, res) => {
   try {
+    const start = process.hrtime.bigint();
     const { userId, items, address } = req.body;
     if (!address || items.length === 0) {
-      res.json({ success: false, message: "Invalid data" });
+      return res.json({ success: false, message: "Invalid data" });
     }
 
     //Calculate Amount Using Items
@@ -38,6 +40,28 @@ export const placeOrderCOD = async (req, res) => {
       address,
       paymentType: "COD",
     });
+
+    const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+
+    console.log(
+      JSON.stringify({
+        type: "business_event",
+        event: "order_placed",
+        payment_type: "COD",
+        item_count: items.length,
+        amount,
+        duration_ms: Number(durationMs.toFixed(2)),
+        timestamp: new Date().toISOString(),
+      })
+    );
+
+    void recordMetric("OrderPlacedCount", 1, "Count", [
+      { Name: "PaymentType", Value: "COD" },
+    ]);
+    void recordMetric("OrderPlacementLatencyMs", durationMs, "Milliseconds", [
+      { Name: "PaymentType", Value: "COD" },
+    ]);
+
     return res.json({ success: true, message: "Order Placed Successfully" });
   } catch (error) {
     console.log(error.message);
