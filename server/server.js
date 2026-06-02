@@ -16,6 +16,8 @@ import { recordMetric } from "./configs/cloudwatch.js";
 const app = express();
 const port = process.env.PORT || 4000;
 
+app.set("etag", false);
+
 const parseOrigins = (...values) =>
   values
     .flatMap((value) => (value || "").split(","))
@@ -40,6 +42,12 @@ await connectCloudinary();
 //Middleware configuration
 app.use(express.json());
 app.use(cookieParser());
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
+});
 app.use(
   cors({
     origin: (origin, callback) => {
