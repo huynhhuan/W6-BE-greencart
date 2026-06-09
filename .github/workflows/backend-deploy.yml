@@ -1,0 +1,89 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/backend-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  PARAMETER_PATH: ${{ vars.PARAMETER_PATH }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Smoke test backend syntax
+        working-directory: server
+        run: node --check server.js
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" ./server
+          docker tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: Deploy on EC2 using SSM
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          TARGET_TAG_KEY: ${{ vars.EC2_TARGET_TAG_KEY }}
+          TARGET_TAG_VALUE: ${{ vars.EC2_TARGET_TAG_VALUE }}
+        run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          COMMAND_ID=$(
+            aws ssm send-command \
+              --region "$AWS_REGION" \
+              --document-name "AWS-RunShellScript" \
+              --targets "Key=tag:${TARGET_TAG_KEY},Values=${TARGET_TAG_VALUE}" \
+              --comment "Deploy GreenCart API ${IMAGE_TAG}" \
+              --parameters "commands=[
+                \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
+                \"docker pull $IMAGE\",
+                \"docker rm -f greencart-api || true\",
+                \"docker run -d --name greencart-api --restart unless-stopped -p 4000:4000 -e AWS_REGION=$AWS_REGION -e PARAMETER_PATH=$PARAMETER_PATH $IMAGE\",
+                \"docker image prune -af --filter until=168h\"
+              ]" \
+              --query "Command.CommandId" \
+              --output text
+          )
+
+          echo "SSM command id: $COMMAND_ID"
+          sleep 10
+
+          aws ssm list-command-invocations \
+            --region "$AWS_REGION" \
+            --command-id "$COMMAND_ID" \
+            --details
