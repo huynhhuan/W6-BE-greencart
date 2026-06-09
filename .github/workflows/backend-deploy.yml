@@ -49,7 +49,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" ./server
+          docker build -f ./server/Dockerfile -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" ./server
           docker tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
@@ -70,10 +70,15 @@ jobs:
               --targets "Key=tag:${TARGET_TAG_KEY},Values=${TARGET_TAG_VALUE}" \
               --comment "Deploy GreenCart API ${IMAGE_TAG}" \
               --parameters "commands=[
+                \"set -euo pipefail\",
+                \"if ! command -v docker >/dev/null 2>&1; then dnf install -y docker; fi\",
+                \"systemctl enable --now docker\",
                 \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
                 \"docker pull $IMAGE\",
                 \"docker rm -f greencart-api || true\",
                 \"docker run -d --name greencart-api --restart unless-stopped -p 4000:4000 -e AWS_REGION=$AWS_REGION -e PARAMETER_PATH=$PARAMETER_PATH $IMAGE\",
+                \"sleep 5\",
+                \"docker ps --filter name=greencart-api --filter status=running --quiet | grep -q . || (docker logs --tail 100 greencart-api; exit 1)\",
                 \"docker image prune -af --filter until=168h\"
               ]" \
               --query "Command.CommandId" \
@@ -81,9 +86,42 @@ jobs:
           )
 
           echo "SSM command id: $COMMAND_ID"
-          sleep 10
+
+          STATUS=""
+          for attempt in {1..36}; do
+            STATUS=$(
+              aws ssm list-command-invocations \
+                --region "$AWS_REGION" \
+                --command-id "$COMMAND_ID" \
+                --details \
+                --query "CommandInvocations[0].Status" \
+                --output text
+            )
+
+            echo "SSM status: $STATUS"
+
+            case "$STATUS" in
+              Success)
+                break
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm list-command-invocations \
+                  --region "$AWS_REGION" \
+                  --command-id "$COMMAND_ID" \
+                  --details
+                exit 1
+                ;;
+            esac
+
+            sleep 5
+          done
 
           aws ssm list-command-invocations \
             --region "$AWS_REGION" \
             --command-id "$COMMAND_ID" \
             --details
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "SSM command did not finish successfully."
+            exit 1
+          fi
